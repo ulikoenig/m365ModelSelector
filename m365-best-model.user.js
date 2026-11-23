@@ -2,13 +2,14 @@
 // @name         M365 Copilot: auto-select best model
 // @name:de      M365 Copilot: bestes Modell automatisch wählen
 // @namespace    m365-model-selector
-// @version      1.3.0
+// @version      1.4.0
 // @description  M365 Copilot Chat: switches the model picker from "Auto" to the model at the very bottom of the picker menu (newest/best available model). URL hash flags: #anonymous starts a temporary chat, #nowork switches Work IQ off (combine with a comma, e.g. #nowork,anonymous).
 // @description:de  M365-Copilot-Chat: schaltet die Modellauswahl von "Auto" auf das Modell ganz unten im Auswahlmenü um (neuestes/bestes verfügbares Modell). URL-Hash-Flags: #anonymous startet einen temporären Chat, #nowork schaltet Work IQ aus (mit Komma kombinierbar, z. B. #nowork,anonymous).
 // @match        https://copilot.cloud.microsoft/chat*
 // @run-at       document-start
 // @noframes
 // @grant        none
+// @license      MIT
 // ==/UserScript==
 
 /*
@@ -19,9 +20,11 @@
  * The page is a SPA and resets the selection to "Auto" on a new chat. The script therefore keeps
  * watching the page and switches again whenever the picker shows "Auto".
  *
- * The user's own choice wins: if the user operates the model menu themselves (real click or key
- * press), the script does not touch the model again until the page is reloaded. A URL change
- * without reload (for example the first message of a new chat) does not lift that.
+ * The user's own choice wins: if the user operates the model menu themselves (a real click on the
+ * picker or in its menu, or Enter/Space/arrow keys there), the script does not touch the model again
+ * until the page is reloaded. Other keys (Tab, typing), other menus and key presses while the script
+ * itself drives the menu do not count. A URL change without reload (for example the first message of
+ * a new chat) does not lift that.
  *
  * Safety nets: after 5 successful switches within 30 s (the page keeps resetting the model) the
  * script pauses model switching for 2 minutes; after 5 failed attempts in a row it stops until the
@@ -72,6 +75,7 @@
       errNotApplied: 'selection was not applied',
       switchLoop: (seconds) => `the page keeps resetting the model: pausing model switching for ${seconds} s`,
       reasserting: (flag) => `the page changed the switch for "#${flag}" back by itself, applying it again`,
+      handsOff: (flag) => `the user operated the switch for "#${flag}", leaving it alone`,
       temporaryRequested: 'URL requests a temporary chat (#anonymous)',
       temporaryStarted: 'temporary chat started',
       temporaryAlready: 'temporary chat is already active',
@@ -98,6 +102,7 @@
       errNotApplied: 'Auswahl wurde nicht übernommen',
       switchLoop: (seconds) => `Die Seite setzt das Modell immer wieder zurück: Modellwechsel pausiert für ${seconds} s`,
       reasserting: (flag) => `Die Seite hat den Schalter für "#${flag}" von selbst zurückgedreht, wende ihn erneut an`,
+      handsOff: (flag) => `Der Nutzer hat den Schalter für "#${flag}" bedient, er bleibt unangetastet`,
       temporaryRequested: 'URL fordert einen temporären Chat an (#anonymous)',
       temporaryStarted: 'temporärer Chat gestartet',
       temporaryAlready: 'temporärer Chat ist bereits aktiv',
@@ -121,6 +126,8 @@
   // ---------- Configuration ----------
 
   const CFG = {
+    debounceMs: 250, // a burst of page changes is handled this long after its last change ...
+    maxWaitMs: 1500, // ... but at the latest this long after its first one (a busy page must not starve the script)
     cooldownMs: 2500, // minimum gap between two switch attempts
     maxAttempts: 5, // consecutive failures, then stay quiet until the URL changes
     stepTimeoutMs: 3000, // wait time per menu step
@@ -255,11 +262,14 @@
     const leftByMenu =
       !current || current === document.body || current === picker || Boolean(current.closest?.('[role="menu"]'));
     if (!leftByMenu) return;
-    if (previous && previous !== document.body && previous.isConnected && typeof previous.focus === 'function') {
-      previous.focus({ preventScroll: true });
-    } else if (current && current === picker) {
-      current.blur(); // nothing had the focus before: do not leave it on the picker
+    const hadFocus = Boolean(previous) && previous !== document.body;
+    if (!hadFocus) {
+      if (current && current === picker) current.blur(); // nothing had the focus before: do not leave it on the picker
+      return;
     }
+    // The page may have re-rendered the element that had the focus: look it up again by its id.
+    const back = previous.isConnected ? previous : previous.id && document.getElementById(previous.id);
+    if (back && typeof back.focus === 'function') back.focus({ preventScroll: true });
   }
 
   // ---------- Hide the menu while switching ----------
@@ -420,6 +430,12 @@
   /** Drives the switch of one pending action into its wanted state. Never repeats once done. */
   async function runAction(action) {
     reassertIfFlippedBack(action);
+    if (action.pending && action.touched) {
+      // The user operates this switch themselves: what the user does always wins, the flag is dropped.
+      action.pending = false;
+      log(t.handsOff(action.flag));
+      return;
+    }
     if (action.pending && Date.now() >= action.deadline) {
       action.pending = false;
       log(action.msg.gaveUp);
@@ -531,16 +547,28 @@
       scheduleAfter(CFG.cooldownMs + 50); // retry without waiting for the page to change
     } finally {
       await sleep(150); // let the menu finish closing before it becomes visible again
-      restoreFocus(previousFocus);
+      if (!userOverride) restoreFocus(previousFocus); // the user operated the menu meanwhile: the focus is theirs
       setBusy(false);
       busy = false;
     }
   }
 
   let timer = 0;
+  let firstTriggerAt = 0;
+  /**
+   * Debounced: `tick` runs `debounceMs` after the last trigger, but at the latest `maxWaitMs` after the
+   * first trigger of a burst. A page that changes all the time (a streaming answer) therefore cannot
+   * postpone the work forever.
+   */
   function schedule() {
+    const now = Date.now();
+    if (!firstTriggerAt) firstTriggerAt = now;
     clearTimeout(timer);
-    timer = setTimeout(tick, 250);
+    const wait = Math.max(0, Math.min(CFG.debounceMs, firstTriggerAt + CFG.maxWaitMs - now));
+    timer = setTimeout(() => {
+      firstTriggerAt = 0;
+      tick();
+    }, wait);
   }
 
   let laterTimer = 0;
@@ -550,19 +578,51 @@
     laterTimer = setTimeout(schedule, ms);
   }
 
+  const MENU_KEYS = new Set(['Enter', ' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']); // keys that operate a menu
+
+  /**
+   * True if `el` sits in a menu that belongs to the model picker: its own menu or a submenu opened from
+   * it. The page labels every menu with its trigger (aria-labelledby): the main menu with the picker, a
+   * submenu with the entry that opens it. A menu without a usable label counts if the picker reports
+   * itself as expanded (aria-expanded="true" while its menu is open).
+   */
+  function inPickerMenu(el, picker) {
+    let node = el;
+    for (let depth = 0; node && depth < 5; depth++) {
+      const menu = node.closest('[role="menu"]');
+      if (!menu) return false;
+      const owner = (menu.getAttribute('aria-labelledby') || '')
+        .split(/\s+/)
+        .map((id) => document.getElementById(id))
+        .find(Boolean);
+      if (!owner) return picker.getAttribute('aria-expanded') === 'true';
+      if (picker.contains(owner)) return true;
+      node = owner;
+    }
+    return false;
+  }
+
   // The user operates the model menu themselves -> leave the model alone until the page is reloaded.
-  // Only real (trusted) events count: the script's own synthetic events are never trusted. This also
-  // holds while the script is busy, so a user click during a switch is not lost.
+  // Only real (trusted) events count: the script's own synthetic events are never trusted. Clicks count
+  // while the script is busy too, so a user click during a switch is not lost. Key presses do not: while
+  // the script drives the menu, the page has moved the focus onto a menu entry, so a key typed at that
+  // moment (typically right after the page loaded) only looks as if it were meant for the menu.
   function onUserInput(event) {
     if (!event.isTrusted) return;
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
-    for (const action of URL_ACTIONS) {
-      const el = action.find();
-      if (el && el.contains(target)) action.touched = true; // the user operates this switch: hands off
+    const isKey = event.type === 'keydown';
+
+    if (!isKey || event.key === 'Enter' || event.key === ' ') {
+      for (const action of URL_ACTIONS) {
+        const el = action.find();
+        if (el && el.contains(target)) action.touched = true; // the user operates this switch: hands off
+      }
     }
+
+    if (isKey && (busy || !MENU_KEYS.has(event.key))) return;
     const picker = findPicker();
-    if ((picker && picker.contains(target)) || target.closest('[role="menuitemradio"]')) {
+    if (picker && (picker.contains(target) || inPickerMenu(target, picker)) && !userOverride) {
       userOverride = true;
       log(t.userSelection);
     }

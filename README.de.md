@@ -19,13 +19,22 @@ auf das Modell um, das **ganz unten im Auswahlmenü** steht (Stand heute: *GPT-6
   folgt das Skript ohne Änderung.
 - **Dauerhaft:** Die Seite setzt die Auswahl bei „Neuer Chat“ und nach dem Laden auf Auto zurück. Das Skript
   beobachtet die Seite und schaltet jedes Mal wieder um.
-- **Eigene Wahl hat Vorrang:** Wer das Modellmenü selbst bedient (echter Klick/Taste, auch mitten im
-  automatischen Umschalten), wird bis zum Neuladen der Seite nicht überstimmt. Eine URL-Änderung ohne Neuladen,
-  etwa beim ersten Senden in einem neuen Chat, hebt das nicht auf. Wer in einem neuen Chat wieder das beste
-  Modell will, lädt die Seite neu.
+- **Eigene Wahl hat Vorrang:** Wer das Modellmenü selbst bedient, wird bis zum Neuladen der Seite nicht überstimmt.
+  Gemeint ist ein echter Klick auf den Wähler oder auf einen Eintrag seines Menüs oder Enter, Leertaste und
+  Pfeiltasten dort; ein Klick zählt auch mitten im automatischen Umschalten. Tab, Tippen, andere Menüs und
+  Tastendrücke, während das Skript selbst das (unsichtbare) Menü bedient, zählen nicht. Eine URL-Änderung ohne
+  Neuladen, etwa beim ersten Senden in einem neuen Chat, hebt das nicht auf. Wer in einem neuen Chat wieder das
+  beste Modell will, lädt die Seite neu.
 - **Sicherheitsnetze:** Setzt die Seite das Modell immer wieder zurück (5 erfolgreiche Wechsel in 30 s), pausiert
   der Modellwechsel 2 Minuten. Nach 5 Fehlversuchen in Folge gibt das Skript auf, bis sich die URL ändert.
   Fehlversuche werden von selbst wiederholt, auch wenn die Seite sich nicht verändert.
+- **Unruhige Seiten:** Änderungen der Seite werden 250 ms nach der letzten bearbeitet, spätestens 1,5 s nach der
+  ersten. Eine Seite, die sich dauernd ändert (eine Antwort wird geschrieben), kann das Skript so nicht beliebig
+  lange aufhalten.
+- **Bekannte Grenzen:** Fünf echte neue Chats innerhalb von 30 s sehen aus wie eine Seite, die das Modell immer
+  wieder zurücksetzt, und lösen die 2-Minuten-Pause aus; die Pause erscheint nur im Debug-Log. Jede URL-Änderung
+  setzt den Fehlerzähler zurück, eine Seite, die ständig ihre URL ändert, wird also vom Limit von 5 Fehlversuchen
+  nicht gestoppt.
 - **Fokus:** Nach dem Umschalten liegt der Tastaturfokus wieder dort, wo er vorher war (meist im Eingabefeld).
   Escape wird nur gesendet, wenn ein Menü offen ist.
 - **Kein Flackern:** Das Menü ist während des automatischen Umschaltens unsichtbar.
@@ -44,11 +53,15 @@ Der Hash der URL kann Flags enthalten, mit Komma getrennt, Groß-/Kleinschreibun
 - **Ganze Wörter:** `#anonymous2` oder `#online` bewirken nichts, unbekannte Flags werden ignoriert. Ein kodiertes
   Komma (`%2C`) und Leerzeichen nach dem Komma werden akzeptiert.
 - **Einmalig und idempotent:** Jedes Flag wirkt einmal pro Seitenaufruf oder wenn sich der Hash ändert. Steht der
-  Schalter schon im gewünschten Zustand, wird er nicht angeklickt. Was der Nutzer danach selbst tut, wird nicht
-  rückgängig gemacht: Wer den temporären Chat verlässt oder Work IQ wieder einschaltet, bleibt dabei.
-- **Nachregeln:** Dreht die Seite einen vom Skript gesetzten Schalter innerhalb von 6 Sekunden von selbst
-  zurück (für Work IQ ohne Skript beobachtet, Ursache unbekannt), setzt das Skript ihn höchstens zweimal erneut.
-  Hat der Nutzer den Schalter angefasst, passiert nichts. Danach gewinnt die Seite.
+  Schalter schon im gewünschten Zustand, wird er nicht angeklickt. Was der Nutzer selbst tut, wird nicht rückgängig
+  gemacht: Wer den temporären Chat verlässt oder Work IQ wieder einschaltet, bleibt dabei, und ein Schalter, den der
+  Nutzer bedient, bevor das Skript sein Flag angewendet hat, bleibt ebenfalls unangetastet (das Flag verfällt).
+- **Nachregeln:** Im E2E-Test auf der echten Seite wurde beobachtet, dass die Seite Work IQ von selbst ändert
+  (mehrfach kurz nach dem Laden von an auf aus, einmal von aus auf an, nachdem das Skript es ausgeschaltet hatte);
+  die Ursache ist unbekannt. Das Skript deckt einen Fall ab: Dreht die Seite einen vom Skript gesetzten Schalter
+  innerhalb von 6 Sekunden zurück, setzt das Skript ihn höchstens zweimal erneut. Hat der Nutzer den Schalter
+  angefasst, passiert nichts. Danach gewinnt die Seite. Änderungen, die die Seite vor jedem angewendeten Flag
+  macht, werden nicht angetastet.
 - **Reihenfolge der Ausführung:** erst temporärer Chat, dann Work IQ, dann die Modellwahl. Ein Schalter, der noch
   nicht gerendert ist, hält die Modellwahl nicht auf; sie läuft dann trotzdem und wird bei Bedarf danach
   wiederholt. Das Modell wird in jeder Kombination weiter umgeschaltet.
@@ -87,9 +100,9 @@ muss das alte löschen, sonst laufen beide (der `@name` hat sich geändert).
 npm install
 npm test            # i18n-Test, Menü-Test (beide ohne Anmeldung) und danach E2E-Test
 npm run test:i18n   # nur Lokalisierung und URL-Flags, Mock-Seiten
-npm run test:menu   # nur Menü-Mock: Regel, Eigenwahl, Schleifenschutz, Wiederholung, Fokus
+npm run test:menu   # nur Menü-Mock: Regel, Eigenwahl, Schleifenschutz, Wiederholung, Fokus, zurückgedrehte Schalter, unruhige Seite
 npm run test:e2e    # nur echte Seite in Edge (ändert Einstellungen im Testprofil-Konto)
-node tools/mutation-check.mjs   # prüft, dass die Menü-Tests die behobenen Fehler wirklich erkennen
+node tools/mutation-check.mjs   # prüft, dass die Menü-Tests die behobenen Fehler wirklich erkennen (etwa 10 Minuten)
 ```
 
 Der i18n-Test serviert Mock-Seiten unter der Copilot-URL und prüft Kopf, Startmeldung und Fehlermeldung je
@@ -97,25 +110,44 @@ Browsersprache (de-DE, de-AT, en-US, fr-FR) sowie die URL-Flags (Schreibweisen, 
 Wirkung, kodiertes Komma, Leerzeichen, unbekannte Flags, schon im Zielzustand, Schalter erscheint spät, Nutzer
 schaltet zurück, Hash-Wechsel, feste Ausführungsreihenfolge).
 
-Der Menü-Test nutzt eine Mock-Seite mit einem Fluent-ähnlichen Modellmenü (Wähler, Menü, Untermenü, Fokus wandert
-ins Menü und zurück). Er prüft die Regel „unterster aktiver Eintrag“ (Untermenü per Hover, Klick oder Pfeil rechts,
-letzter Eintrag deaktiviert), Fokus, Eigenwahl samt URL-Änderung ohne Neuladen, Klick im Umschaltfenster,
-Schleifenschutz, Wiederholung nach Fehlversuchen, Zurücksetzen des Fehlerzählers und einen Hash-Wechsel während
-des Umschaltens. `tools/mutation-check.mjs` baut jeden behobenen Fehler wieder in eine Kopie des Skripts ein und
-verlangt, dass die zugehörige Prüfung dann fehlschlägt.
+Der Menü-Test nutzt eine Mock-Seite mit einem Fluent-ähnlichen Modellmenü. Das Mock übernimmt, was mit
+`tools/menu-probe.mjs` auf der echten Seite gemessen wurde: Der Fokus wandert auf den ersten Menüeintrag und beim
+Schließen zurück auf den Wähler, der Wähler trägt `aria-expanded`, solange sein Menü offen ist, und jedes Menü ist
+per `aria-labelledby` mit seinem Auslöser beschriftet. Geprüft werden die Regel „unterster aktiver Eintrag“
+(Untermenü per Hover, Klick oder Pfeil rechts, letzter Eintrag deaktiviert), Fokus (auch wenn der Nutzer ihn
+woanders hingesetzt hat oder die Seite das Eingabefeld neu aufbaut), Eigenwahl (ein echter Klick oder eine Taste auf
+dem Wähler oder in seinem Menü zählt; Tab, ein fremdes Menü und eine Taste, während das Skript das Menü bedient,
+zählen nicht), der Schleifenschutz (auch das Ende der Pause und das gleitende Fenster), Wiederholung und Deckel bei
+Fehlversuchen, ein Hash-Wechsel während des Umschaltens, von der Seite zurückgedrehte Schalter (auch nur über
+`aria-checked`/`aria-pressed` und nach dem Prüffenster), ein Schalter, den der Nutzer vor dem Anwenden des Flags
+bedient, und eine Seite, die sich alle 100 ms ändert. Pause, Fenster und Prüffenster werden je Fall verkürzt, indem
+Zahlen des `CFG`-Blocks im geladenen Skripttext ersetzt werden; so lässt sich die Logik testen, ohne die echten
+Zeiten abzuwarten.
+
+`tools/mutation-check.mjs` baut jeden behobenen Fehler und jede Sicherung in eine Kopie des Skripts ein (28
+Mutanten) und verlangt, dass die zugehörige Prüfung dann fehlschlägt. Das Werkzeug sichert sich gegen falsche
+Ergebnisse ab: Zuerst muss ein Basislauf auf dem unveränderten Skript grün sein, jede Änderung muss genau einmal
+passen, jede Mutante muss sich parsen lassen, nur die erwarteten Prüfungen dürfen fehlschlagen, und eine Mutante, die
+kein Test vom Original unterscheiden kann (`x-rerun-only`, im Werkzeug begründet), ist als äquivalent erklärt und muss
+alles bestehen.
 
 Der E2E-Test startet Edge mit einem eigenen Profil (`.profile/`, nicht Ihr normales Edge-Profil), meldet sich über
 Windows-SSO an (Kachel des Kontos über die Umgebungsvariable `M365_SSO_TILE`, z. B. `M365_SSO_TILE=example.com`;
-ohne sie meldet man sich im geöffneten Fenster selbst an) und setzt die Auswahl dabei einmal auf Auto zurück. Er ermittelt den
-untersten Menüeintrag unabhängig vom Skript, lädt das Skript als Init-Skript und prüft: Umschalten, richtiges
-Modell, kein sichtbares Menü beim Umschalten, Eigenwahl, Neuladen, „Neuer Chat“.
+ohne sie meldet man sich im geöffneten Fenster selbst an) und setzt die Auswahl dabei einmal auf Auto zurück. Er
+ermittelt den untersten Menüeintrag unabhängig vom Skript, lädt das Skript als Init-Skript und prüft: Umschalten,
+richtiges Modell, kein sichtbares Menü beim Umschalten, Eigenwahl, Neuladen, „Neuer Chat“ und dass echte Tastendrücke
+während des Umschaltens die Automatik nicht sperren.
 
 Grenze: Tampermonkey selbst läuft im Test nicht (Erweiterungen lassen sich in Edge nicht automatisiert laden).
 Das Skript nutzt kein `GM_*`-API (`@grant none`) und läuft daher im Test unverändert.
 `tools/debug-run.mjs` zeigt Konsole und Wählerzustand, falls Microsoft die Oberfläche ändert.
 `tools/workiq-state.mjs` liest den Work-IQ-Zustand nach frischem Laden (`--set on|off` setzt ihn), und
 `tools/workiq-flip-rate.mjs` lädt die Seite mehrfach in frischen Browsern und zählt, wie oft Work IQ von allein
-ausgeschaltet endet (Messung: 0 von 12, mit und ohne Skript).
+ausgeschaltet endet (Messung: 0 von 12, mit und ohne Skript; in E2E-Läufen mit dem langlebigen Testprofil kam es
+trotzdem gelegentlich vor, Ursache unbekannt). `tools/menu-probe.mjs` öffnet auf der echten Seite das Modellmenü,
+ohne etwas zu wählen, und zeigt, wohin der Fokus wandert und wie die Menüs beschriftet sind. `tools/b1-repro.mjs`
+schickt echte Pfeiltasten, während das Skript das Modell umschaltet, und prüft, dass die Automatik danach nicht
+gesperrt ist (`M365_SCRIPT=<Datei>` lässt es gegen einen anderen Skriptstand laufen).
 
 ## Lizenz
 

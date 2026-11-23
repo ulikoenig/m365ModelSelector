@@ -2,7 +2,7 @@
 // automatisiert laden; das Userscript läuft daher unverändert als Init-Skript (@grant none, kein GM_*-API).
 import fs from 'node:fs';
 import path from 'node:path';
-import { launch, openChat, root, out } from '../tools/lib.mjs';
+import { launch, openChat, root, out, pressKeysUntilSwitched } from '../tools/lib.mjs';
 
 const scriptPath = path.join(root, 'm365-best-model.user.js');
 const scriptSrc = fs.readFileSync(scriptPath, 'utf8');
@@ -188,6 +188,32 @@ const viaQuery = await (async () => {
   return false;
 })();
 check('Umschalten auch über /chat?redirfrom=mcmToCcm', viaQuery, await label(p1).catch(() => '?'));
+
+// --- Tastendrücke während des Umschaltens sperren die Automatik nicht (zweiter Review, B1) ---
+// Das Skript öffnet das Menü unsichtbar; der Fokus liegt dann auf dem ersten Menüeintrag (gemessen mit
+// tools/menu-probe.mjs). Ein echter Tastendruck in diesem Fenster darf nicht als Eigenwahl zählen.
+await picker(p1).click();
+await p1.locator('[role="menuitemradio"]').first().click(); // zurück auf Auto
+await p1.waitForTimeout(1000);
+const linesBeforeKeys = consoleLines.length;
+await p1.goto('https://copilot.cloud.microsoft/chat/', { waitUntil: 'domcontentloaded' });
+const typed = await pressKeysUntilSwitched(p1, 'ArrowDown');
+await p1.waitForTimeout(1500);
+check('Tastendrücke beim Umschalten: das Modell wird trotzdem umgeschaltet', typed.switched, `${typed.keys} Tasten, Wähler: ${await label(p1).catch(() => '?')}`);
+check(
+  'Tastendrücke beim Umschalten zählen nicht als Eigenwahl',
+  !consoleLines.slice(linesBeforeKeys).some((l) => /Nutzerauswahl erkannt|user selection detected/.test(l)),
+  consoleLines.slice(linesBeforeKeys).join(' | '),
+);
+const newChatAfterKeys = p1.getByText('Neuer Chat', { exact: true }).first();
+if (await newChatAfterKeys.count()) {
+  await newChatAfterKeys.click();
+  await p1.waitForTimeout(6000);
+  const l = await label(p1);
+  check('Tastendrücke beim Umschalten: nach "Neuer Chat" schaltet das Skript wieder um', !/^auto$/i.test(l), l);
+} else {
+  console.log('INFO  "Neuer Chat" nicht gefunden, Folgeprüfung zu den Tastendrücken übersprungen');
+}
 
 // --- Temporärer Chat über #anonymous (echte Seite) ---
 const tempToggle = (p) => p.locator('button[aria-pressed][aria-label*="empor" i]').first();

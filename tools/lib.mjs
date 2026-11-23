@@ -41,3 +41,24 @@ export async function openChat(page, { timeoutMs = 150_000, url = CHAT_URL } = {
   }
   throw new Error('Chat-Seite nicht erreicht: ' + page.url().slice(0, 100));
 }
+
+/**
+ * Schickt echte (vertrauenswürdige) Tastendrücke im Abstand von rund 30 ms, bis der Modellwähler nicht mehr auf
+ * "Auto" steht oder maxMs vergangen sind. So trifft garantiert ein Tastendruck das Fenster, in dem das Skript
+ * das Modellmenü bedient. Liefert, wie viele Tasten gesendet wurden und ob umgeschaltet wurde.
+ */
+export async function pressKeysUntilSwitched(page, key, maxMs = 20_000) {
+  const picker = page.locator('button[aria-label$="Modellauswahl"]').first();
+  const end = Date.now() + maxMs;
+  let keys = 0;
+  while (Date.now() < end) {
+    await page.keyboard.press(key);
+    keys++;
+    if (keys % 4 === 0) {
+      const text = ((await picker.textContent({ timeout: 300 }).catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+      if (text && !/^auto$/i.test(text)) return { keys, switched: true };
+    }
+    await page.waitForTimeout(30);
+  }
+  return { keys, switched: false };
+}
