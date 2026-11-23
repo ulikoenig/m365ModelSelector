@@ -1,0 +1,17 @@
+{
+  "name": "m365modelselector",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Tampermonkey-Skript: M365 Copilot Chat schaltet von Auto auf das unterste Modell im Menü um, plus Playwright-Test in Edge",
+  "type": "module",
+  "scripts": {
+    "test": "node test/i18n.mjs && node test/menu.mjs && node test/e2e.mjs",
+    "test:i18n": "node test/i18n.mjs",
+    "test:menu": "node test/menu.mjs",
+    "test:e2e": "node test/e2e.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.65.1"
+  }
+}

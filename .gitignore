@@ -1,0 +1,4 @@
+node_modules/
+# Edge-Testprofil enthält die angemeldete Sitzung, Screenshots enthalten Chat-Titel
+.profile/
+out/
